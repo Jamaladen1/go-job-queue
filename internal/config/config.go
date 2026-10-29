@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -27,6 +28,19 @@ type Config struct {
 
 func Load() (Config, error) {
 	host, _ := os.Hostname()
+	var bad []string
+	getint := func(k string, def int) int {
+		v := os.Getenv(k)
+		if v == "" {
+			return def
+		}
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			bad = append(bad, k)
+			return def
+		}
+		return n
+	}
 	c := Config{
 		DatabaseURL:       os.Getenv("DATABASE_URL"),
 		APIKey:            os.Getenv("API_KEY"),
@@ -43,12 +57,27 @@ func Load() (Config, error) {
 		MaxSleepMS:        getint("MAX_SLEEP_MS", 10000),
 		EmbeddedWorkers:   getint("EMBEDDED_WORKERS", 0),
 	}
+	if len(bad) > 0 {
+		return c, fmt.Errorf("not an integer: %s", strings.Join(bad, ", "))
+	}
 	return c, c.Validate()
 }
 
 func (c Config) Validate() error {
 	if c.DatabaseURL == "" {
 		return fmt.Errorf("DATABASE_URL is required")
+	}
+	for name, d := range map[string]time.Duration{
+		"LEASE_SECONDS": c.LeaseDuration, "HANDLER_TIMEOUT_SECONDS": c.HandlerTimeout,
+		"POLL_INTERVAL_MS": c.PollInterval, "HEARTBEAT_SECONDS": c.HeartbeatInterval,
+		"REAP_INTERVAL_SECONDS": c.ReapInterval, "WORKER_STALE_SECONDS": c.WorkerStaleAfter,
+	} {
+		if d <= 0 {
+			return fmt.Errorf("%s must be positive", name)
+		}
+	}
+	if c.ShutdownGrace < 0 {
+		return fmt.Errorf("SHUTDOWN_GRACE_SECONDS must not be negative")
 	}
 	if c.HandlerTimeout >= c.LeaseDuration {
 		return fmt.Errorf("HANDLER_TIMEOUT_SECONDS (%s) must be shorter than LEASE_SECONDS (%s)", c.HandlerTimeout, c.LeaseDuration)
@@ -68,15 +97,6 @@ func (c Config) Validate() error {
 func getenv(k, def string) string {
 	if v := os.Getenv(k); v != "" {
 		return v
-	}
-	return def
-}
-
-func getint(k string, def int) int {
-	if v := os.Getenv(k); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			return n
-		}
 	}
 	return def
 }
