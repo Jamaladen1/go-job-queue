@@ -282,16 +282,19 @@ func (s *Store) Fail(ctx context.Context, id, token, workerID, nextStatus string
 }
 
 // Release hands a job back immediately (graceful shutdown that ran out of grace time).
+// The interrupted attempt is not counted: otherwise a job released on its last
+// attempt would be requeued with attempts = max_attempts and claimed once more.
 func (s *Store) Release(ctx context.Context, id, token, workerID string) error {
 	tag, err := s.pool.Exec(ctx, `
 		WITH upd AS (
 			UPDATE jobs SET status = 'queued', run_after = now(), updated_at = now(),
+				attempts = attempts - 1,
 				lease_owner = NULL, lease_token = NULL, lease_until = NULL
 			WHERE `+fence+`
-			RETURNING id, attempts
+			RETURNING id, attempts + 1 AS attempt
 		)
 		INSERT INTO job_events (job_id, event_type, detail)
-		SELECT id, 'released', jsonb_build_object('worker', $3::text, 'attempt', attempts) FROM upd`,
+		SELECT id, 'released', jsonb_build_object('worker', $3::text, 'attempt', attempt) FROM upd`,
 		id, token, workerID)
 	if err != nil {
 		return err

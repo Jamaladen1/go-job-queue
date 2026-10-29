@@ -212,6 +212,8 @@ Set `API_KEY` for any public deployment, because the dashboard then prompts for 
 - **No lease renewal.** Jobs must finish inside `HANDLER_TIMEOUT_SECONDS` (< lease). Long jobs would need heartbeat-based renewal.
 - **Lease expiry consumes an attempt.** A job whose worker crashes on its last attempt goes `dead`. This is intended,
   because it protects against poison jobs that crash workers.
+- **A graceful-shutdown release does not consume an attempt.** The released job goes back to `queued` with its attempt
+  refunded (the `released` event records which attempt was interrupted), so `attempts` never exceeds `max_attempts`.
 - **Manual retry resets `attempts` to 0**, giving a fresh budget. The previous status and attempt count are kept in a `manual_retry` event.
 - **Single shared API key.** There is no per-tenant auth, rate limiting, or job retention/cleanup.
 - **`job_events` grows unbounded.** Metrics scan the tables, which is fine at demo scale but needs indexes/rollups beyond it.
