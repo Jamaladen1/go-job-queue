@@ -1,0 +1,75 @@
+name: gojobqueue
+
+x-worker: &worker
+  build: .
+  image: gojobqueue:latest
+  command: ["/app/worker"]
+  restart: "no"
+  environment: &worker-env
+    DATABASE_URL: postgres://jobs:jobs@postgres:5432/jobs?sslmode=disable
+    WORKER_CONCURRENCY: "2"
+    POLL_INTERVAL_MS: "300"
+    LEASE_SECONDS: "15"
+    HANDLER_TIMEOUT_SECONDS: "8"
+    HEARTBEAT_SECONDS: "2"
+    REAP_INTERVAL_SECONDS: "3"
+    SHUTDOWN_GRACE_SECONDS: "10"
+    MAX_SLEEP_MS: "7000"
+  depends_on:
+    api:
+      condition: service_healthy
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: jobs
+      POSTGRES_PASSWORD: jobs
+      POSTGRES_DB: jobs
+    ports:
+      - "55432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U jobs -d jobs"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  api:
+    build: .
+    image: gojobqueue:latest
+    command: ["/app/api"]
+    environment:
+      DATABASE_URL: postgres://jobs:jobs@postgres:5432/jobs?sslmode=disable
+      PORT: "8080"
+      API_KEY: ${API_KEY:-}
+      LEASE_SECONDS: "15"
+      HANDLER_TIMEOUT_SECONDS: "8"
+      MAX_SLEEP_MS: "7000"
+      WORKER_STALE_SECONDS: "6"
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/health/ready >/dev/null || exit 1"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  worker-1:
+    <<: *worker
+    environment:
+      <<: *worker-env
+      WORKER_ID: worker-1
+
+  worker-2:
+    <<: *worker
+    environment:
+      <<: *worker-env
+      WORKER_ID: worker-2
+
+volumes:
+  pgdata:

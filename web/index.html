@@ -1,0 +1,442 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Job Queue · Operations</title>
+<style>
+  :root {
+    --bg: #0b0e14; --panel: #121722; --panel-2: #161c2a; --line: #232b3d; --text: #e6e9f0;
+    --muted: #8a93a8; --dim: #5d667b; --accent: #7aa2ff;
+    --queued: #8ea4c8; --running: #f5b544; --succeeded: #3ecf8e; --failed: #ff8a4c; --dead: #ff5c72;
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--text);
+    font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, sans-serif; }
+  .wrap { max-width: 1440px; margin: 0 auto; padding: 20px 24px 40px; }
+  header { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin-bottom: 18px; }
+  .logo { width: 36px; height: 36px; border-radius: 9px; display: grid; place-items: center;
+    background: linear-gradient(135deg, #3b5bdb, #7aa2ff); font-weight: 800; color: #fff; font-size: 15px; }
+  h1 { font-size: 19px; margin: 0; letter-spacing: -0.01em; }
+  .sub { color: var(--muted); font-size: 12.5px; }
+  .tags { display: flex; gap: 6px; margin-left: auto; flex-wrap: wrap; align-items: center; }
+  .tag { font-size: 11.5px; padding: 4px 9px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); background: var(--panel); }
+  .tag.alo { color: #ffd78a; border-color: #5a4720; background: #241d0e; font-weight: 600; cursor: help; }
+  .live { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--muted); }
+  .live i { width: 7px; height: 7px; border-radius: 50%; background: var(--succeeded); box-shadow: 0 0 0 0 rgba(62,207,142,.6); animation: ping 1.6s infinite; }
+  .live.off i { background: var(--dead); animation: none; }
+  @keyframes ping { 0% { box-shadow: 0 0 0 0 rgba(62,207,142,.55);} 70% { box-shadow: 0 0 0 7px rgba(62,207,142,0);} 100% { box-shadow: 0 0 0 0 rgba(62,207,142,0);} }
+
+  .cards { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 10px; margin-bottom: 16px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; position: relative; overflow: hidden; }
+  .card::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 3px; background: var(--c, var(--accent)); }
+  .card .k { color: var(--muted); font-size: 11.5px; text-transform: uppercase; letter-spacing: .06em; }
+  .card .v { font-size: 26px; font-weight: 700; margin-top: 2px; font-variant-numeric: tabular-nums; }
+  .card .h { color: var(--dim); font-size: 11.5px; }
+
+  .grid { display: grid; grid-template-columns: 340px minmax(0, 1fr) 380px; gap: 14px; align-items: start; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; }
+  .panel > .ph { display: flex; align-items: center; justify-content: space-between; padding: 12px 14px; border-bottom: 1px solid var(--line); }
+  .panel > .ph h2 { margin: 0; font-size: 13px; font-weight: 650; letter-spacing: .01em; }
+  .panel > .pb { padding: 12px 14px; }
+  .stack { display: grid; gap: 14px; }
+
+  label { display: block; color: var(--muted); font-size: 11.5px; margin-bottom: 4px; }
+  input, select { width: 100%; background: var(--panel-2); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 7px 9px; font: inherit; font-size: 13px; }
+  input:focus, select:focus { outline: none; border-color: var(--accent); }
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px; }
+  .check { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12.5px; margin: 2px 0 12px; }
+  .check input { width: auto; }
+  button { font: inherit; font-size: 13px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel-2); color: var(--text); padding: 7px 11px; cursor: pointer; }
+  button:hover { border-color: #3a4560; }
+  button.primary { background: #3b5bdb; border-color: #3b5bdb; color: #fff; font-weight: 600; width: 100%; padding: 9px; }
+  button.primary:hover { background: #4c6ef5; }
+  .presets { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 10px; }
+  .presets button { font-size: 12px; text-align: left; padding: 7px 9px; }
+  .presets button small { display: block; color: var(--dim); font-size: 11px; }
+
+  .worker { display: grid; grid-template-columns: auto 1fr auto; gap: 10px; align-items: center; padding: 10px 0; border-bottom: 1px dashed var(--line); }
+  .worker:last-child { border-bottom: 0; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; }
+  .dot.active { background: var(--succeeded); box-shadow: 0 0 10px rgba(62,207,142,.6); }
+  .dot.stale { background: var(--dead); box-shadow: 0 0 10px rgba(255,92,114,.6); }
+  .dot.stopped { background: var(--dim); }
+  .wname { font-family: var(--mono); font-size: 13px; font-weight: 600; }
+  .wmeta { color: var(--muted); font-size: 11.5px; }
+  .slots { display: flex; gap: 3px; justify-content: flex-end; }
+  .slots span { width: 14px; height: 6px; border-radius: 2px; background: var(--line); }
+  .slots span.on { background: var(--running); }
+  .wstate { font-size: 11px; text-align: right; color: var(--muted); }
+  .wstate.stale { color: var(--dead); font-weight: 600; }
+
+  .filters { display: flex; gap: 4px; flex-wrap: wrap; }
+  .filters button { font-size: 11.5px; padding: 4px 9px; border-radius: 999px; }
+  .filters button.on { background: #22304f; border-color: #3b5bdb; color: #cfe0ff; }
+  table { width: 100%; border-collapse: collapse; }
+  th { text-align: left; color: var(--dim); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; padding: 8px 12px; border-bottom: 1px solid var(--line); }
+  td { padding: 8px 12px; border-bottom: 1px solid #1a2130; font-size: 13px; white-space: nowrap; }
+  tr.job { cursor: pointer; }
+  tr.job:hover td { background: #151b29; }
+  tr.job.sel td { background: #182240; }
+  .mono { font-family: var(--mono); font-size: 12px; }
+  .muted { color: var(--muted); }
+  .chip { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; font-weight: 600; padding: 2px 8px; border-radius: 999px;
+    color: var(--c); background: color-mix(in srgb, var(--c) 14%, transparent); border: 1px solid color-mix(in srgb, var(--c) 35%, transparent); }
+  .chip::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--c); }
+  .chip.running::before { animation: blink 1s infinite; }
+  @keyframes blink { 50% { opacity: .25; } }
+  .s-queued { --c: var(--queued); } .s-running { --c: var(--running); } .s-succeeded { --c: var(--succeeded); }
+  .s-failed { --c: var(--failed); } .s-dead { --c: var(--dead); }
+  .att { display: inline-flex; gap: 2px; vertical-align: middle; margin-right: 6px; }
+  .att i { width: 7px; height: 7px; border-radius: 2px; background: var(--line); }
+  .att i.used { background: var(--accent); }
+  .att i.used.bad { background: var(--failed); }
+  .empty { color: var(--dim); text-align: center; padding: 28px 10px; font-size: 13px; }
+
+  .kv { display: grid; grid-template-columns: 110px 1fr; gap: 6px 10px; font-size: 12.5px; }
+  .kv dt { color: var(--muted); } .kv dd { margin: 0; overflow-wrap: anywhere; }
+  pre { background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font-family: var(--mono); font-size: 11.5px; margin: 6px 0 0; white-space: pre-wrap; word-break: break-all; max-height: 120px; overflow: auto; }
+  .err { color: #ffb4a0; }
+  .timeline { list-style: none; margin: 10px 0 0; padding: 0; position: relative; }
+  .timeline::before { content: ""; position: absolute; left: 6px; top: 6px; bottom: 6px; width: 2px; background: var(--line); }
+  .timeline li { position: relative; padding: 0 0 12px 22px; font-size: 12.5px; }
+  .timeline li::before { content: ""; position: absolute; left: 1px; top: 4px; width: 12px; height: 12px; border-radius: 50%; background: var(--panel); border: 2px solid var(--c, var(--accent)); }
+  .timeline .t { color: var(--dim); font-family: var(--mono); font-size: 11px; }
+  .timeline b { font-weight: 650; }
+  .feed { max-height: 330px; overflow: auto; }
+  .feed .ev { display: grid; grid-template-columns: 62px 1fr; gap: 8px; padding: 6px 0; border-bottom: 1px solid #1a2130; font-size: 12px; }
+  .feed .ev .t { color: var(--dim); font-family: var(--mono); font-size: 11px; }
+  .ev-claimed { --c: var(--running); } .ev-succeeded { --c: var(--succeeded); } .ev-retry_scheduled { --c: var(--failed); }
+  .ev-dead { --c: var(--dead); } .ev-failed { --c: var(--failed); } .ev-lease_expired { --c: var(--dead); }
+  .ev-stale_ack_rejected { --c: #c792ea; } .ev-enqueued { --c: var(--queued); } .ev-manual_retry { --c: var(--accent); } .ev-released { --c: var(--queued); }
+  .evname { color: var(--c); font-weight: 650; }
+  .note { margin-top: 10px; font-size: 11.5px; color: var(--muted); background: #1a1710; border: 1px solid #3d3218; border-radius: 8px; padding: 8px 10px; }
+  .toast { position: fixed; bottom: 20px; right: 20px; background: #1d2740; border: 1px solid #3b5bdb; color: #dbe5ff; padding: 10px 14px; border-radius: 10px; font-size: 13px; opacity: 0; transform: translateY(8px); transition: .2s; pointer-events: none; }
+  .toast.show { opacity: 1; transform: none; }
+  .toast.bad { border-color: var(--dead); background: #2a1419; color: #ffd0d7; }
+  #apikey-row { display: none; }
+  @media (max-width: 1200px) { .grid { grid-template-columns: 1fr 1fr; } .cards { grid-template-columns: repeat(4, 1fr); } }
+  @media (max-width: 760px) { .grid { grid-template-columns: 1fr; } .cards { grid-template-columns: repeat(2, 1fr); } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="logo">JQ</div>
+    <div>
+      <h1>Distributed Job Queue</h1>
+      <div class="sub">Go workers · PostgreSQL <span class="mono">FOR UPDATE SKIP LOCKED</span> leasing · fenced acknowledgements</div>
+    </div>
+    <div class="tags">
+      <span class="tag alo" title="A worker may finish a job's side effects and crash before acknowledging; the job is then retried. Handlers must be idempotent. Exactly-once is a non-goal.">⚠ At-least-once delivery</span>
+      <span class="tag" id="lease-tag">lease —</span>
+      <span class="tag" id="timeout-tag">timeout —</span>
+      <span class="live" id="live"><i></i><span id="live-text">live</span></span>
+    </div>
+  </header>
+
+  <section class="cards" id="cards">
+    <div class="card s-queued" style="--c:var(--queued)"><div class="k">Queued</div><div class="v" id="m-queued">–</div><div class="h" id="m-delayed">–</div></div>
+    <div class="card" style="--c:var(--running)"><div class="k">Running</div><div class="v" id="m-running">–</div><div class="h">leased right now</div></div>
+    <div class="card" style="--c:var(--succeeded)"><div class="k">Succeeded</div><div class="v" id="m-succeeded">–</div><div class="h" id="m-avg">–</div></div>
+    <div class="card" style="--c:var(--failed)"><div class="k">Failed</div><div class="v" id="m-failed">–</div><div class="h">non-retriable</div></div>
+    <div class="card" style="--c:var(--dead)"><div class="k">Dead</div><div class="v" id="m-dead">–</div><div class="h">attempts exhausted</div></div>
+    <div class="card" style="--c:var(--accent)"><div class="k">Throughput</div><div class="v" id="m-tput">–</div><div class="h">succeeded / last 60s</div></div>
+    <div class="card" style="--c:var(--failed)"><div class="k">Retries</div><div class="v" id="m-retries">–</div><div class="h" id="m-leases">–</div></div>
+    <div class="card" style="--c:#c792ea"><div class="k">Stale acks blocked</div><div class="v" id="m-stale">–</div><div class="h">fencing token rejects</div></div>
+  </section>
+
+  <div class="grid">
+    <div class="stack">
+      <div class="panel">
+        <div class="ph"><h2>Submit batch</h2><span class="sub" id="types"></span></div>
+        <form class="pb" id="submit-batch" autocomplete="off">
+          <div class="row">
+            <div><label for="f-type">Job type</label>
+              <select id="f-type"><option value="sleep">sleep</option><option value="compute">compute (SHA-256)</option></select></div>
+            <div><label for="f-count">Count</label><input id="f-count" type="number" min="1" max="50" value="10"></div>
+          </div>
+          <div class="row">
+            <div><label for="f-duration" id="f-duration-label">duration_ms</label><input id="f-duration" type="number" min="1" value="2500"></div>
+            <div><label for="f-fail">fail_until_attempt</label><input id="f-fail" type="number" min="0" max="20" value="0"></div>
+          </div>
+          <div class="row">
+            <div><label for="f-max">max_attempts</label><input id="f-max" type="number" min="1" max="10" value="3"></div>
+            <div><label for="f-priority">priority</label><input id="f-priority" type="number" min="-100" max="100" value="0"></div>
+          </div>
+          <div class="check"><input type="checkbox" id="f-perm"><label for="f-perm" style="margin:0">permanent_fail (non-retriable)</label></div>
+          <div class="row" id="apikey-row"><div style="grid-column:1/-1"><label for="f-key">API key (required by server)</label><input id="f-key" type="password"></div></div>
+          <button class="primary" type="submit" id="submit-btn">Submit jobs</button>
+          <div class="presets">
+            <button type="button" data-preset="parallel">10 × sleep 3s<small>parallel processing</small></button>
+            <button type="button" data-preset="retry">Retry → success<small>fail_until_attempt=3</small></button>
+            <button type="button" data-preset="dead">Dead letter<small>fails all 3 attempts</small></button>
+            <button type="button" data-preset="compute">Compute<small>500k SHA-256 rounds</small></button>
+          </div>
+        </form>
+      </div>
+
+      <div class="panel">
+        <div class="ph"><h2>Workers</h2><span class="sub" id="workers-active">–</span></div>
+        <div class="pb" id="workers"><div class="empty">No workers registered yet</div></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="ph"><h2>Latest jobs</h2>
+        <div class="filters" id="filters">
+          <button class="on" data-status="">all</button><button data-status="queued">queued</button><button data-status="running">running</button>
+          <button data-status="succeeded">succeeded</button><button data-status="failed">failed</button><button data-status="dead">dead</button>
+        </div>
+      </div>
+      <div style="overflow-x:auto">
+        <table id="jobs-table">
+          <thead><tr><th>Job</th><th>Type</th><th>Status</th><th>Attempts</th><th>Worker</th><th>Duration</th><th>Created</th></tr></thead>
+          <tbody id="jobs-body"><tr><td colspan="7" class="empty">Loading…</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="stack">
+      <div class="panel" id="job-detail">
+        <div class="ph"><h2>Job detail</h2><span id="detail-actions"></span></div>
+        <div class="pb" id="detail-body"><div class="empty">Select a job to see its lease history and event timeline.</div></div>
+      </div>
+      <div class="panel">
+        <div class="ph"><h2>Event stream</h2><span class="sub">from job_events</span></div>
+        <div class="pb feed" id="events"></div>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+const $ = (s) => document.querySelector(s);
+const state = { filter: "", selected: null, key: "", cfg: null, failures: 0 };
+try { state.key = sessionStorage.getItem("jq_api_key") || ""; } catch (_) {}
+
+const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const short = (id) => id ? id.slice(0, 8) : "";
+const fmtTime = (t) => t ? new Date(t).toLocaleTimeString([], { hour12: false }) : "—";
+function ago(t) {
+  if (!t) return "—";
+  const s = Math.max(0, (Date.now() - new Date(t).getTime()) / 1000);
+  if (s < 60) return `${s.toFixed(0)}s ago`;
+  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+  return `${Math.floor(s / 3600)}h ago`;
+}
+function dur(j) {
+  if (!j.started_at) return "—";
+  const end = j.finished_at ? new Date(j.finished_at) : (j.status === "running" ? new Date() : null);
+  if (!end) return "—";
+  const ms = end - new Date(j.started_at);
+  return ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`;
+}
+function toast(msg, bad) {
+  const t = $("#toast"); t.textContent = msg; t.className = "toast show" + (bad ? " bad" : "");
+  clearTimeout(toast.h); toast.h = setTimeout(() => (t.className = "toast"), 2600);
+}
+
+async function api(path, opts = {}) {
+  const headers = { "Content-Type": "application/json" };
+  if (state.key) headers["X-API-Key"] = state.key;
+  const res = await fetch(path, { ...opts, headers });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) { const e = new Error(body.error || res.statusText); e.status = res.status; throw e; }
+  return body;
+}
+
+const chip = (s) => `<span class="chip s-${esc(s)} ${s === "running" ? "running" : ""}">${esc(s)}</span>`;
+function attempts(j) {
+  let h = '<span class="att">';
+  for (let i = 1; i <= j.max_attempts; i++) {
+    const used = i <= j.attempts;
+    const bad = used && (i < j.attempts || j.status === "dead" || j.status === "failed");
+    h += `<i class="${used ? "used" : ""} ${bad ? "bad" : ""}"></i>`;
+  }
+  return h + `</span><span class="muted mono">${j.attempts}/${j.max_attempts}</span>`;
+}
+
+function renderMetrics(m) {
+  const c = m.counts || {};
+  $("#m-queued").textContent = c.queued ?? 0;
+  $("#m-delayed").textContent = `${m.queue_depth} ready · ${m.delayed} in backoff`;
+  $("#m-running").textContent = c.running ?? 0;
+  $("#m-succeeded").textContent = c.succeeded ?? 0;
+  $("#m-avg").textContent = m.avg_duration_ms ? `avg ${(m.avg_duration_ms / 1000).toFixed(2)}s (5m)` : "avg —";
+  $("#m-failed").textContent = c.failed ?? 0;
+  $("#m-dead").textContent = c.dead ?? 0;
+  $("#m-tput").textContent = m.throughput_per_min;
+  $("#m-retries").textContent = m.retries_scheduled;
+  $("#m-leases").textContent = `${m.leases_expired} lease expiries`;
+  $("#m-stale").textContent = m.stale_acks_rejected;
+}
+
+function renderWorkers(d) {
+  const ws = d.workers || [];
+  $("#workers-active").textContent = `${d.active} active / ${ws.length}`;
+  if (!ws.length) { $("#workers").innerHTML = '<div class="empty">No workers registered yet</div>'; return; }
+  const conc = 2;
+  $("#workers").innerHTML = ws.map((w) => {
+    const age = (w.heartbeat_age_ms / 1000).toFixed(1);
+    const label = w.state === "stale" ? `no heartbeat ${age}s` : w.state === "stopped" ? "stopped" : `♥ ${age}s ago`;
+    let slots = "";
+    for (let i = 0; i < Math.max(conc, w.inflight); i++) slots += `<span class="${i < w.inflight && w.state === "active" ? "on" : ""}"></span>`;
+    return `<div class="worker" data-worker="${esc(w.worker_id)}">
+      <span class="dot ${esc(w.state)}"></span>
+      <div><div class="wname">${esc(w.worker_id)}</div>
+        <div class="wmeta">${w.jobs_succeeded} ok · ${w.jobs_failed} failed · up ${ago(w.started_at).replace(" ago", "")}</div></div>
+      <div><div class="slots">${slots}</div><div class="wstate ${esc(w.state)}">${esc(label)}</div></div>
+    </div>`;
+  }).join("");
+}
+
+function renderJobs(d) {
+  const jobs = d.jobs || [];
+  if (!jobs.length) { $("#jobs-body").innerHTML = '<tr><td colspan="7" class="empty">No jobs yet — submit a batch.</td></tr>'; return; }
+  $("#jobs-body").innerHTML = jobs.map((j) => `
+    <tr class="job ${state.selected === j.id ? "sel" : ""}" data-id="${esc(j.id)}">
+      <td class="mono">${esc(short(j.id))}</td>
+      <td>${esc(j.type)}</td>
+      <td>${chip(j.status)}</td>
+      <td>${attempts(j)}</td>
+      <td class="mono muted">${esc(j.lease_owner || "—")}</td>
+      <td class="mono">${dur(j)}</td>
+      <td class="muted">${ago(j.created_at)}</td>
+    </tr>`).join("");
+}
+
+function describe(e) {
+  const d = e.detail || {};
+  switch (e.event_type) {
+    case "enqueued": return `queued (priority ${d.priority}, max ${d.max_attempts} attempts)`;
+    case "claimed": return `claimed by <b>${esc(d.worker)}</b> · attempt ${d.attempt} · token <span class="mono">${esc(short(d.lease_token))}</span>`;
+    case "succeeded": return `acknowledged by <b>${esc(d.worker)}</b> in ${d.duration_ms}ms`;
+    case "retry_scheduled": return `attempt ${d.attempt} failed on ${esc(d.worker)} — retry in ${(d.backoff_ms / 1000).toFixed(1)}s<div class="err">${esc(d.error)}</div>`;
+    case "dead": return `attempt ${d.attempt} failed — <b>dead</b> (attempts exhausted)<div class="err">${esc(d.error)}</div>`;
+    case "failed": return `non-retriable failure on ${esc(d.worker)}<div class="err">${esc(d.error)}</div>`;
+    case "lease_expired": return `lease of <b>${esc(d.previous_owner)}</b> expired → ${esc(d.new_status)} (reaped by ${esc(d.recovered_by)})`;
+    case "stale_ack_rejected": return `late ${esc(d.op)} from <b>${esc(d.worker)}</b> rejected — token <span class="mono">${esc(short(d.presented_token))}</span> no longer valid`;
+    case "released": return `released by ${esc(d.worker)} during shutdown`;
+    case "manual_retry": return `manually retried (was ${esc(d.previous_status)} after ${d.previous_attempts} attempts)`;
+    default: return esc(JSON.stringify(d));
+  }
+}
+
+function renderEvents(d) {
+  const ev = d.events || [];
+  if (!ev.length) { $("#events").innerHTML = '<div class="empty">No events yet</div>'; return; }
+  $("#events").innerHTML = ev.map((e) => `
+    <div class="ev ev-${esc(e.event_type)}"><span class="t">${fmtTime(e.created_at)}</span>
+      <div><span class="evname">${esc(e.event_type)}</span> <span class="mono muted">${esc(short(e.job_id))}</span> · ${describe(e)}</div></div>`).join("");
+}
+
+function renderDetail(d) {
+  const j = d.job;
+  const retryable = j.status === "dead" || j.status === "failed";
+  $("#detail-actions").innerHTML = retryable ? `<button id="retry-btn" data-id="${esc(j.id)}">Retry job</button>` : "";
+  $("#detail-body").innerHTML = `
+    <dl class="kv">
+      <dt>ID</dt><dd class="mono">${esc(j.id)}</dd>
+      <dt>Status</dt><dd>${chip(j.status)}</dd>
+      <dt>Type</dt><dd>${esc(j.type)} <span class="muted">· priority ${j.priority}</span></dd>
+      <dt>Attempts</dt><dd>${attempts(j)}</dd>
+      <dt>Lease</dt><dd class="mono">${j.lease_owner ? `${esc(j.lease_owner)} · token ${esc(short(j.lease_token))} · until ${fmtTime(j.lease_until)}` : "—"}</dd>
+      <dt>Run after</dt><dd class="mono">${fmtTime(j.run_after)}</dd>
+      <dt>Duration</dt><dd class="mono">${dur(j)}</dd>
+    </dl>
+    <label style="margin-top:10px">Payload</label><pre>${esc(JSON.stringify(j.payload))}</pre>
+    ${j.result ? `<label style="margin-top:8px">Result</label><pre>${esc(JSON.stringify(j.result))}</pre>` : ""}
+    ${j.last_error ? `<label style="margin-top:8px">Last error</label><pre class="err">${esc(j.last_error)}</pre>` : ""}
+    <label style="margin-top:12px">Event timeline</label>
+    <ul class="timeline">${(d.events || []).map((e) => `<li class="ev-${esc(e.event_type)}"><span class="t">${fmtTime(e.created_at)}</span> <span class="evname">${esc(e.event_type)}</span><div>${describe(e)}</div></li>`).join("")}</ul>`;
+}
+
+async function tick() {
+  try {
+    const qs = state.filter ? `?status=${state.filter}&limit=25` : "?limit=25";
+    const [m, w, j, e] = await Promise.all([api("/api/metrics"), api("/api/workers"), api("/api/jobs" + qs), api("/api/events?limit=40")]);
+    renderMetrics(m); renderWorkers(w); renderJobs(j); renderEvents(e);
+    if (state.selected) renderDetail(await api(`/api/jobs/${state.selected}`));
+    $("#live").classList.remove("off"); $("#live-text").textContent = "live · 1s";
+  } catch (err) {
+    $("#live").classList.add("off"); $("#live-text").textContent = "disconnected";
+  }
+}
+
+async function loadConfig() {
+  try {
+    const c = await api("/api/config"); state.cfg = c;
+    $("#lease-tag").textContent = `lease ${c.lease_seconds}s`;
+    $("#timeout-tag").textContent = `handler timeout ${c.handler_timeout_seconds}s`;
+    $("#f-duration").max = c.max_sleep_ms;
+    if (c.auth_required) { $("#apikey-row").style.display = "grid"; $("#f-key").value = state.key; }
+  } catch (_) {}
+}
+
+function payloadFor(type, n) {
+  const fail = +$("#f-fail").value || 0, perm = $("#f-perm").checked;
+  const p = type === "sleep" ? { duration_ms: n } : { input: "portfolio-demo", iterations: n };
+  if (fail) p.fail_until_attempt = fail;
+  if (perm) p.permanent_fail = true;
+  return p;
+}
+
+async function submitBatch(ev) {
+  ev && ev.preventDefault();
+  if (state.cfg && state.cfg.auth_required) { state.key = $("#f-key").value; try { sessionStorage.setItem("jq_api_key", state.key); } catch (_) {} }
+  const type = $("#f-type").value, count = Math.min(50, Math.max(1, +$("#f-count").value || 1));
+  const n = +$("#f-duration").value || 1;
+  const body = { type, payload: payloadFor(type, n), max_attempts: +$("#f-max").value || 3, priority: +$("#f-priority").value || 0 };
+  const results = await Promise.allSettled(Array.from({ length: count }, () => api("/api/jobs", { method: "POST", body: JSON.stringify(body) })));
+  const ok = results.filter((r) => r.status === "fulfilled").length;
+  const bad = results.find((r) => r.status === "rejected");
+  if (bad) toast(`${ok}/${count} submitted — ${bad.reason.message}`, true); else toast(`Submitted ${ok} ${type} job${ok === 1 ? "" : "s"}`);
+  if (bad && bad.reason.status === 401) $("#apikey-row").style.display = "grid";
+  tick();
+}
+
+const presets = {
+  parallel: { type: "sleep", count: 10, n: 3000, fail: 0, max: 3, perm: false },
+  retry: { type: "sleep", count: 3, n: 800, fail: 3, max: 3, perm: false },
+  dead: { type: "sleep", count: 2, n: 500, fail: 9, max: 3, perm: false },
+  compute: { type: "compute", count: 6, n: 500000, fail: 0, max: 3, perm: false },
+};
+function syncTypeLabel() {
+  const sleep = $("#f-type").value === "sleep";
+  $("#f-duration-label").textContent = sleep ? "duration_ms" : "iterations";
+  $("#f-duration").max = sleep ? (state.cfg ? state.cfg.max_sleep_ms : 10000) : 2000000;
+}
+
+$("#submit-batch").addEventListener("submit", submitBatch);
+$("#f-type").addEventListener("change", () => { syncTypeLabel(); $("#f-duration").value = $("#f-type").value === "sleep" ? 2500 : 200000; });
+document.querySelectorAll("[data-preset]").forEach((b) => b.addEventListener("click", () => {
+  const p = presets[b.dataset.preset];
+  $("#f-type").value = p.type; syncTypeLabel();
+  $("#f-count").value = p.count; $("#f-duration").value = p.n; $("#f-fail").value = p.fail; $("#f-max").value = p.max; $("#f-perm").checked = p.perm;
+  submitBatch();
+}));
+$("#filters").addEventListener("click", (e) => {
+  const b = e.target.closest("button"); if (!b) return;
+  state.filter = b.dataset.status;
+  document.querySelectorAll("#filters button").forEach((x) => x.classList.toggle("on", x === b));
+  tick();
+});
+$("#jobs-body").addEventListener("click", (e) => {
+  const tr = e.target.closest("tr.job"); if (!tr) return;
+  state.selected = tr.dataset.id; tick();
+});
+$("#detail-actions").addEventListener("click", async (e) => {
+  if (e.target.id !== "retry-btn") return;
+  try { await api(`/api/jobs/${e.target.dataset.id}/retry`, { method: "POST" }); toast("Job requeued with a fresh attempt budget"); }
+  catch (err) { toast(err.message, true); }
+  tick();
+});
+
+loadConfig().then(tick);
+setInterval(tick, 1000);
+</script>
+</body>
+</html>
