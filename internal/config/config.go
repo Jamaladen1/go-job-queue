@@ -22,6 +22,7 @@ type Config struct {
 	ShutdownGrace     time.Duration
 	WorkerStaleAfter  time.Duration
 	MaxSleepMS        int
+	EmbeddedWorkers   int
 }
 
 func Load() (Config, error) {
@@ -40,6 +41,7 @@ func Load() (Config, error) {
 		ShutdownGrace:     time.Duration(getint("SHUTDOWN_GRACE_SECONDS", 10)) * time.Second,
 		WorkerStaleAfter:  time.Duration(getint("WORKER_STALE_SECONDS", 10)) * time.Second,
 		MaxSleepMS:        getint("MAX_SLEEP_MS", 10000),
+		EmbeddedWorkers:   getint("EMBEDDED_WORKERS", 0),
 	}
 	return c, c.Validate()
 }
@@ -56,6 +58,9 @@ func (c Config) Validate() error {
 	}
 	if c.Concurrency < 1 || c.Concurrency > 32 {
 		return fmt.Errorf("WORKER_CONCURRENCY must be between 1 and 32")
+	}
+	if c.EmbeddedWorkers < 0 || c.EmbeddedWorkers > 8 {
+		return fmt.Errorf("EMBEDDED_WORKERS must be between 0 and 8")
 	}
 	return nil
 }

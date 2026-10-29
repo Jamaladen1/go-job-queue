@@ -1,0 +1,27 @@
+# Render Blueprint: free-tier deploy of the API + dashboard with embedded workers.
+# Postgres is external (e.g. Neon free tier). Set DATABASE_URL in the Render
+# dashboard when prompted; it is never committed.
+services:
+  - type: web
+    name: go-job-queue
+    runtime: docker
+    plan: free
+    healthCheckPath: /health/ready
+    autoDeploy: true
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: EMBEDDED_WORKERS
+        value: "2"
+      - key: WORKER_ID
+        value: render
+      - key: WORKER_CONCURRENCY
+        value: "2"
+      - key: LEASE_SECONDS
+        value: "15"
+      - key: HANDLER_TIMEOUT_SECONDS
+        value: "8"
+      - key: MAX_SLEEP_MS
+        value: "7000"
+      - key: POLL_INTERVAL_MS
+        value: "1000"

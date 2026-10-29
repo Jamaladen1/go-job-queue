@@ -172,6 +172,23 @@ The connection string is never logged, only host and database name.
 
 ## Deploying (hosted)
 
+### Free deploy: Render + Neon ($0)
+
+`render.yaml` deploys the API and dashboard as one free Render web service with
+`EMBEDDED_WORKERS=2`: two worker loops run inside the API process, each with its own
+worker ID and lease. They still coordinate only through Postgres, so claiming, fencing
+and recovery are unchanged. What you lose is independent scaling and the "kill one
+worker container" demo, which needs the Docker Compose setup.
+
+1. Create a free Neon project and copy its **direct** (not pooled) connection string.
+2. In Render: **New → Blueprint**, pick this repo, and paste the string as `DATABASE_URL`.
+3. Free instances sleep after ~15 min idle. The first request after that takes ~30–60s.
+   Leases held when the instance slept expire and are reclaimed on wake.
+
+The demo is open (no `API_KEY`), so anyone can submit jobs. Payloads are capped
+(sleep ≤ 7s, bounded compute), and no user code runs.
+
+
 The image contains both binaries. Run it as two kinds of services against one managed Postgres:
 
 1. Provision Postgres 13+ (Neon, Supabase, RDS, Render, Fly Postgres) and get its `DATABASE_URL` (`sslmode=require`).

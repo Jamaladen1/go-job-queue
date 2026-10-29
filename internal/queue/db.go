@@ -17,6 +17,9 @@ func Connect(ctx context.Context, url string, log *slog.Logger) (*pgxpool.Pool, 
 	if err != nil {
 		return nil, fmt.Errorf("parse DATABASE_URL: %w", err)
 	}
+	// Hosted URLs (e.g. Neon) may include channel_binding, which pgx would
+	// otherwise forward to the server as an unknown runtime parameter.
+	delete(cfg.ConnConfig.RuntimeParams, "channel_binding")
 	cfg.MaxConns = 10
 	var lastErr error
 	for i := 0; i < 30; i++ {
